@@ -1,6 +1,6 @@
-export type DeviceType = "ixc" | "ont" | "onu" | "olt" | "switch" | "router" | "server" | "cpe";
+export type DeviceType = "ixc" | "ont" | "onu" | "olt" | "switch" | "router" | "server" | "cpe" | "cloud";
 
-export type DiagramZone = "provisionamento" | "acesso" | "core" | "servicos";
+export type DiagramZone = "transit" | "servicos" | "core" | "distribuicao" | "acesso" | "clientes";
 
 export type FlowTone = "ixc" | "dhcp" | "pppoe" | "tr069" | "topologia";
 

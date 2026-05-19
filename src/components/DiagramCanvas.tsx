@@ -1,19 +1,19 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { devices, links } from "../data/network";
-import type { Device, DiagramZone, Flow, Link } from "../types";
-import { DeviceGlyph } from "./DeviceGlyph";
+import type { Device, Flow, Link } from "../types";
 
 type DiagramCanvasProps = {
   flow: Flow;
   isAnimating: boolean;
 };
 
-const zoneMeta: Record<DiagramZone, { label: string; x: number; y: number; width: number; height: number }> = {
-  provisionamento: { label: "Provisionamento", x: 32, y: 48, width: 280, height: 228 },
-  acesso: { label: "Acesso GPON", x: 32, y: 392, width: 596, height: 468 },
-  core: { label: "Transporte e Core", x: 716, y: 132, width: 932, height: 470 },
-  servicos: { label: "Ambiente de Servicos", x: 1028, y: 704, width: 620, height: 196 },
+type HoveredDeviceState = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 const toneClassMap: Record<Flow["tone"], string> = {
@@ -40,36 +40,160 @@ function packetStyle(path: Array<[number, number]>, isAnimating: boolean): CSSPr
   };
 }
 
-function DeviceNode({ device }: { device: Device }) {
-  const labelX = device.x + device.width / 2;
-  const labelY = device.y + device.height + 24;
-
-  return (
-    <g className="device-node is-active">
-      <rect className="device-frame" x={device.x} y={device.y} width={device.width} height={device.height} rx={20} />
-      <DeviceGlyph type={device.type} x={device.x} y={device.y} width={device.width} height={device.height} />
-      <text className="device-title" x={labelX} y={labelY}>
-        {device.name}
-      </text>
-      <text className="device-subtitle" x={labelX} y={labelY + 18}>
-        {device.role}
-      </text>
-    </g>
-  );
+function isInsideDevice(point: [number, number], device: Device) {
+  const [x, y] = point;
+  return x > device.x && x < device.x + device.width && y > device.y && y < device.y + device.height;
 }
 
-function LinkShape({ link, toneClass }: { link: Link; toneClass: string }) {
-  const points = buildPolyline(link.points);
-  const fallbackPoint = link.points[Math.max(0, Math.floor(link.points.length / 2) - 1)];
+function clipPointToDeviceBorder(point: [number, number], nextPoint: [number, number], device: Device): [number, number] {
+  if (!isInsideDevice(point, device)) {
+    return point;
+  }
+
+  const [x1, y1] = point;
+  const [x2, y2] = nextPoint;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+
+  if (dx === 0 && dy === 0) {
+    return point;
+  }
+
+  const candidates: number[] = [];
+
+  if (dx !== 0) {
+    const leftT = (device.x - x1) / dx;
+    const rightT = (device.x + device.width - x1) / dx;
+    candidates.push(leftT, rightT);
+  }
+
+  if (dy !== 0) {
+    const topT = (device.y - y1) / dy;
+    const bottomT = (device.y + device.height - y1) / dy;
+    candidates.push(topT, bottomT);
+  }
+
+  const validT = candidates
+    .filter((value) => value >= 0 && value <= 1)
+    .sort((a, b) => a - b)
+    .find((value) => {
+      const candidateX = x1 + dx * value;
+      const candidateY = y1 + dy * value;
+      return (
+        candidateX >= device.x - 0.5 &&
+        candidateX <= device.x + device.width + 0.5 &&
+        candidateY >= device.y - 0.5 &&
+        candidateY <= device.y + device.height + 0.5
+      );
+    });
+
+  if (validT === undefined) {
+    return point;
+  }
+
+  return [x1 + dx * validT, y1 + dy * validT];
+}
+
+function adjustLinkPoints(link: Link, deviceMap: Map<string, Device>) {
+  if (link.points.length < 2) {
+    return link.points;
+  }
+
+  const adjustedPoints = [...link.points];
+  const fromDevice = deviceMap.get(link.from);
+  const toDevice = deviceMap.get(link.to);
+
+  if (fromDevice) {
+    adjustedPoints[0] = clipPointToDeviceBorder(adjustedPoints[0], adjustedPoints[1], fromDevice);
+  }
+
+  if (toDevice) {
+    const lastIndex = adjustedPoints.length - 1;
+    adjustedPoints[lastIndex] = clipPointToDeviceBorder(adjustedPoints[lastIndex], adjustedPoints[lastIndex - 1], toDevice);
+  }
+
+  return adjustedPoints;
+}
+
+function buildDeviceDescription(device: Device) {
+  switch (device.type) {
+    case "cloud":
+      return "Ponto de saida da rede para o upstream principal, concentrando a borda de Internet e a interligacao com o backbone externo.";
+    case "router":
+      return `Elemento de roteamento responsavel por ${device.role.toLowerCase()}, mantendo a continuidade do trafego entre borda e core.`;
+    case "switch":
+      if (device.zone === "core") {
+        return "Nucleo de comutacao e agregacao da malha principal, distribuindo o trafego entre upstream, distribuicao e acesso.";
+      }
+      return "Switch de distribuicao que consolida enlaces do site e encaminha o trafego para o proximo dominio da topologia.";
+    case "server":
+      return `Bloco de servicos que suporta ${device.role.toLowerCase()} e centraliza workloads operacionais do ambiente.`;
+    case "ixc":
+      return "Aplicacao central de ERP e provisionamento, usada para automacao operacional, integracao e gestao de clientes.";
+    case "olt":
+      return `Equipamento GPON de acesso responsavel por terminar as portas PON e entregar o servico no dominio ${device.shortName.toLowerCase()}.`;
+    case "ont":
+      return "Terminal do assinante na ponta da fibra, responsavel por encerrar a conexao optica e apresentar a WAN de servico.";
+    case "onu":
+      return "Unidade optica no lado do cliente que faz a terminacao de acesso e a ponte para o equipamento residencial.";
+    case "cpe":
+      return "Equipamento residencial do assinante, usado para autenticar, rotear e distribuir a conectividade entregue pela rede.";
+    default:
+      return device.role;
+  }
+}
+
+function DeviceNode({
+  device,
+  isTopology,
+  onHoverStart,
+  onHoverEnd,
+}: {
+  device: Device;
+  isTopology: boolean;
+  onHoverStart: (device: Device) => void;
+  onHoverEnd: () => void;
+  }) {
+    const labelX = device.x + device.width / 2;
+    const topBarHeight = 12;
+    const titleY = device.y + topBarHeight + 19;
+    const subtitleY = device.y + topBarHeight + 35;
+    const simpleRoleLabel = device.type === "cloud" ? "transit" : device.type;
+
+    return (
+      <g
+        className={`device-node device-${device.type} is-active ${isTopology ? "is-topology" : ""}`}
+        onMouseEnter={() => onHoverStart(device)}
+      onMouseLeave={onHoverEnd}
+    >
+      <rect className="device-frame-shadow" x={device.x + 4} y={device.y + 6} width={device.width} height={device.height} rx={12} />
+      <rect className="device-frame" x={device.x} y={device.y} width={device.width} height={device.height} rx={12} />
+      <rect className="device-frame-topbar" x={device.x} y={device.y} width={device.width} height={topBarHeight} rx={12} />
+      <rect className="device-frame-topbar-mask" x={device.x} y={device.y + topBarHeight - 4} width={device.width} height="8" />
+      <line className="device-divider" x1={device.x + 14} y1={device.y + topBarHeight + 42} x2={device.x + device.width - 14} y2={device.y + topBarHeight + 42} />
+      <text className="device-title is-inline" x={labelX} y={titleY}>
+        {device.name}
+      </text>
+      <text className="device-subtitle is-inline" x={labelX} y={subtitleY}>
+        {simpleRoleLabel}
+      </text>
+      </g>
+    );
+  }
+
+function LinkShape({ link, toneClass, isTopology, deviceMap }: { link: Link; toneClass: string; isTopology: boolean; deviceMap: Map<string, Device> }) {
+  const adjustedPoints = adjustLinkPoints(link, deviceMap);
+  const points = buildPolyline(adjustedPoints);
+  const fallbackPoint = adjustedPoints[Math.max(0, Math.floor(adjustedPoints.length / 2) - 1)];
   const labelX = link.labelX ?? fallbackPoint[0];
   const labelY = link.labelY ?? fallbackPoint[1] - 14;
   const anchor = link.labelAnchor ?? "middle";
 
   return (
-    <g className="link-group is-active">
+    <g className={`link-group is-active ${isTopology ? "is-topology" : ""}`}>
       <polyline className="link-base" points={points} />
-      <polyline className={`link-highlight ${toneClass}`} points={points} />
-      {link.label ? (
+      {isTopology ? null : <polyline className={`link-highlight ${toneClass}`} points={points} />}
+      {!isTopology && link.label ? (
         <text className="link-label" x={labelX} y={labelY} textAnchor={anchor}>
           {link.label}
         </text>
@@ -81,6 +205,7 @@ function LinkShape({ link, toneClass }: { link: Link; toneClass: string }) {
 export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
+  const [hoveredDeviceId, setHoveredDeviceId] = useState<string | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const panStateRef = useRef({ active: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 });
 
@@ -88,11 +213,26 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
   const activeLinkIds = useMemo(() => new Set(flow.activeLinks), [flow.activeLinks]);
   const visibleDevices = useMemo(() => devices.filter((device) => activeDeviceIds.has(device.id)), [activeDeviceIds]);
   const visibleLinks = useMemo(() => links.filter((link) => activeLinkIds.has(link.id)), [activeLinkIds]);
-  const visibleZones = useMemo(() => {
-    const zoneIds = new Set(visibleDevices.map((device) => device.zone));
-    return Object.entries(zoneMeta).filter(([zoneId]) => zoneIds.has(zoneId as DiagramZone));
-  }, [visibleDevices]);
+  const visibleDeviceMap = useMemo(() => new Map(visibleDevices.map((device) => [device.id, device])), [visibleDevices]);
+  const hoveredDevice = useMemo(
+    () => visibleDevices.find((device) => device.id === hoveredDeviceId) ?? null,
+    [hoveredDeviceId, visibleDevices],
+  );
   const toneClass = toneClassMap[flow.tone];
+  const isTopology = flow.tone === "topologia";
+  const hoverCard = useMemo<HoveredDeviceState | null>(() => {
+    if (!hoveredDevice) {
+      return null;
+    }
+
+    return {
+      id: hoveredDevice.id,
+      x: hoveredDevice.x + hoveredDevice.width + 18,
+      y: hoveredDevice.y - 10,
+      width: 286,
+      height: 198,
+    };
+  }, [hoveredDevice]);
 
   useEffect(() => {
     function handleMove(event: MouseEvent) {
@@ -141,12 +281,16 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
     event.preventDefault();
   }
 
+  useEffect(() => {
+    setHoveredDeviceId(null);
+  }, [flow.id]);
+
   return (
     <section className="diagram-panel">
       <div className="diagram-toolbar">
         <div>
-          <p className="eyebrow">Mapa Operacional</p>
-          <h2>Fluxo selecionado</h2>
+          <p className="eyebrow">Operational map</p>
+          <h2>Canvas top-down</h2>
         </div>
 
         <div className="diagram-toolbar-actions">
@@ -157,7 +301,7 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
             <button type="button" className="toolbar-button toolbar-button-wide" onClick={() => setZoom(1)}>
               Reset
             </button>
-            <button type="button" className="toolbar-button" onClick={() => setZoom((value) => Math.min(1.6, Number((value + 0.1).toFixed(2))))}>
+            <button type="button" className="toolbar-button" onClick={() => setZoom((value) => Math.min(1.55, Number((value + 0.1).toFixed(2))))}>
               +
             </button>
           </div>
@@ -174,24 +318,39 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
         onContextMenu={(event) => event.preventDefault()}
       >
         <div className="diagram-surface" style={{ transform: `scale(${zoom})` }}>
-          <svg viewBox="0 0 1680 940" role="img" aria-label={flow.name}>
-            {visibleZones.map(([, zone]) => (
-              <g key={zone.label}>
-                <rect className="zone-box" x={zone.x} y={zone.y} width={zone.width} height={zone.height} rx="26" />
-                <text className="zone-label" x={zone.x + 24} y={zone.y + 32}>
-                  {zone.label}
-                </text>
-              </g>
-            ))}
-
+          <svg viewBox="0 0 1800 1920" role="img" aria-label={flow.name}>
             {visibleLinks.map((link) => (
-              <LinkShape key={link.id} link={link} toneClass={toneClass} />
+              <LinkShape key={link.id} link={link} toneClass={toneClass} isTopology={isTopology} deviceMap={visibleDeviceMap} />
             ))}
 
             {visibleDevices.map((device) => (
-              <DeviceNode key={device.id} device={device} />
+              <DeviceNode
+                key={device.id}
+                device={device}
+                isTopology={isTopology}
+                onHoverStart={(nextDevice) => setHoveredDeviceId(nextDevice.id)}
+                onHoverEnd={() => setHoveredDeviceId((current) => (current === device.id ? null : current))}
+              />
             ))}
           </svg>
+
+          {hoveredDevice && hoverCard ? (
+              <div
+                className="device-hover-card"
+                style={{
+                  left: hoverCard.x * zoom,
+                  top: hoverCard.y * zoom,
+                width: hoverCard.width * zoom,
+                  minHeight: hoverCard.height * zoom,
+                }}
+              >
+                <div className={`device-hover-accent device-${hoveredDevice.type}`} />
+                <p className="device-hover-eyebrow">{hoveredDevice.type === "cloud" ? "Transit" : hoveredDevice.type}</p>
+                <strong className="device-hover-title">{hoveredDevice.name}</strong>
+                <span className="device-hover-shortname">{hoveredDevice.shortName}</span>
+                <p className="device-hover-copy">{buildDeviceDescription(hoveredDevice)}</p>
+              </div>
+            ) : null}
 
           {flow.packetLabel && flow.path.length > 1 ? (
             <div className={`packet-overlay ${isAnimating ? "is-animating" : ""}`} style={packetStyle(flow.path, isAnimating)}>
