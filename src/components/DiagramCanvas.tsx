@@ -318,7 +318,7 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
         onContextMenu={(event) => event.preventDefault()}
       >
         <div className="diagram-surface" style={{ transform: `scale(${zoom})` }}>
-          <svg viewBox="0 0 1800 1920" role="img" aria-label={flow.name}>
+          <svg viewBox="0 0 1860 1920" role="img" aria-label={flow.name}>
             {visibleLinks.map((link) => (
               <LinkShape key={link.id} link={link} toneClass={toneClass} isTopology={isTopology} deviceMap={visibleDeviceMap} />
             ))}
