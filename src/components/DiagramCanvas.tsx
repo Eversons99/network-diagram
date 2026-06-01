@@ -28,6 +28,19 @@ function buildPolyline(points: Array<[number, number]>) {
   return points.map(([x, y]) => `${x},${y}`).join(" ");
 }
 
+type RenderSegment = {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+};
+
+type AxisInterval = {
+  start: number;
+  end: number;
+};
+
 function buildOffsetPath(points: Array<[number, number]>) {
   return `path('M ${points.map(([x, y], index) => `${index === 0 ? "" : "L "}${x} ${y}`).join(" ")}')`;
 }
@@ -115,6 +128,109 @@ function adjustLinkPoints(link: Link, deviceMap: Map<string, Device>) {
   return adjustedPoints;
 }
 
+function addAxisInterval(groups: Map<number, AxisInterval[]>, fixedPosition: number, start: number, end: number) {
+  if (start === end) {
+    return;
+  }
+
+  const interval = { start: Math.min(start, end), end: Math.max(start, end) };
+  const group = groups.get(fixedPosition) ?? [];
+  group.push(interval);
+  groups.set(fixedPosition, group);
+}
+
+function mergeAxisIntervals(groups: Map<number, AxisInterval[]>, orientation: "horizontal" | "vertical") {
+  const segments: RenderSegment[] = [];
+
+  groups.forEach((intervals, fixedPosition) => {
+    const sortedIntervals = [...intervals].sort((a, b) => a.start - b.start || a.end - b.end);
+    const mergedIntervals: AxisInterval[] = [];
+
+    sortedIntervals.forEach((interval) => {
+      const previous = mergedIntervals[mergedIntervals.length - 1];
+
+      if (!previous || interval.start > previous.end) {
+        mergedIntervals.push({ ...interval });
+        return;
+      }
+
+      previous.end = Math.max(previous.end, interval.end);
+    });
+
+    mergedIntervals.forEach((interval) => {
+      if (orientation === "horizontal") {
+        segments.push({
+          id: `h-${fixedPosition}-${interval.start}-${interval.end}`,
+          x1: interval.start,
+          y1: fixedPosition,
+          x2: interval.end,
+          y2: fixedPosition,
+        });
+        return;
+      }
+
+      segments.push({
+        id: `v-${fixedPosition}-${interval.start}-${interval.end}`,
+        x1: fixedPosition,
+        y1: interval.start,
+        x2: fixedPosition,
+        y2: interval.end,
+      });
+    });
+  });
+
+  return segments;
+}
+
+function buildDiagonalSegmentKey(start: [number, number], end: [number, number]) {
+  const startKey = `${start[0]},${start[1]}`;
+  const endKey = `${end[0]},${end[1]}`;
+  return startKey < endKey ? `${startKey}-${endKey}` : `${endKey}-${startKey}`;
+}
+
+function buildTopologySegments(activeLinks: Link[], deviceMap: Map<string, Device>) {
+  const horizontalGroups = new Map<number, AxisInterval[]>();
+  const verticalGroups = new Map<number, AxisInterval[]>();
+  const diagonalSegments = new Map<string, RenderSegment>();
+
+  activeLinks.forEach((link) => {
+    const adjustedPoints = adjustLinkPoints(link, deviceMap);
+
+    adjustedPoints.forEach((point, index) => {
+      if (index === adjustedPoints.length - 1) {
+        return;
+      }
+
+      const nextPoint = adjustedPoints[index + 1];
+
+      if (point[0] === nextPoint[0]) {
+        addAxisInterval(verticalGroups, point[0], point[1], nextPoint[1]);
+        return;
+      }
+
+      if (point[1] === nextPoint[1]) {
+        addAxisInterval(horizontalGroups, point[1], point[0], nextPoint[0]);
+        return;
+      }
+
+      const id = buildDiagonalSegmentKey(point, nextPoint);
+      diagonalSegments.set(id, {
+        id: `d-${id}`,
+        x1: point[0],
+        y1: point[1],
+        x2: nextPoint[0],
+        y2: nextPoint[1],
+      });
+    });
+  });
+
+  return [
+    ...mergeAxisIntervals(horizontalGroups, "horizontal"),
+    ...mergeAxisIntervals(verticalGroups, "vertical"),
+    ...diagonalSegments.values(),
+  ];
+}
+
 function buildDeviceDescription(device: Device) {
   switch (device.type) {
     case "cloud":
@@ -198,6 +314,25 @@ function LinkShape({ link, toneClass, isTopology, deviceMap }: { link: Link; ton
           {link.label}
         </text>
       ) : null}
+    </g>
+  );
+}
+
+function TopologyLinkLayer({ activeLinks, deviceMap }: { activeLinks: Link[]; deviceMap: Map<string, Device> }) {
+  const topologySegments = buildTopologySegments(activeLinks, deviceMap);
+
+  return (
+    <g className="link-group is-active is-topology">
+      {topologySegments.map((segment) => (
+        <line
+          key={segment.id}
+          className="link-base"
+          x1={segment.x1}
+          y1={segment.y1}
+          x2={segment.x2}
+          y2={segment.y2}
+        />
+      ))}
     </g>
   );
 }
@@ -319,9 +454,13 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
       >
         <div className="diagram-surface" style={{ transform: `scale(${zoom})` }}>
           <svg viewBox="0 0 1860 1920" role="img" aria-label={flow.name}>
-            {visibleLinks.map((link) => (
-              <LinkShape key={link.id} link={link} toneClass={toneClass} isTopology={isTopology} deviceMap={visibleDeviceMap} />
-            ))}
+            {isTopology ? (
+              <TopologyLinkLayer activeLinks={visibleLinks} deviceMap={visibleDeviceMap} />
+            ) : (
+              visibleLinks.map((link) => (
+                <LinkShape key={link.id} link={link} toneClass={toneClass} isTopology={isTopology} deviceMap={visibleDeviceMap} />
+              ))
+            )}
 
             {visibleDevices.map((device) => (
               <DeviceNode
