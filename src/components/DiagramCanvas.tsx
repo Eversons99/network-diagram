@@ -19,6 +19,15 @@ type HoveredDeviceState = {
 
 const DEVICE_ICON_MARGIN = 6;
 
+const zoneLabelMap: Record<Device["zone"], string> = {
+  transit: "Transit",
+  servicos: "Servicos",
+  core: "Core",
+  distribuicao: "Distribuicao",
+  acesso: "Acesso",
+  clientes: "Clientes",
+};
+
 const toneClassMap: Record<Flow["tone"], string> = {
   ixc: "tone-ixc",
   dhcp: "tone-dhcp",
@@ -482,11 +491,12 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
   const [hoveredDeviceId, setHoveredDeviceId] = useState<string | null>(null);
+  const [pinnedDeviceId, setPinnedDeviceId] = useState<string | null>(null);
   const [draggingDeviceId, setDraggingDeviceId] = useState<string | null>(null);
   const [positionOverrides, setPositionOverrides] = useState<Record<string, { x: number; y: number }>>({});
   const frameRef = useRef<HTMLDivElement | null>(null);
   const panStateRef = useRef({ active: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 });
-  const dragStateRef = useRef<{ id: string; startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const dragStateRef = useRef<{ id: string; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
   const zoomRef = useRef(zoom);
 
   useEffect(() => {
@@ -511,21 +521,42 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
     () => visibleDevices.find((device) => device.id === hoveredDeviceId) ?? null,
     [hoveredDeviceId, visibleDevices],
   );
+  const pinnedDevice = useMemo(
+    () => visibleDevices.find((device) => device.id === pinnedDeviceId) ?? null,
+    [pinnedDeviceId, visibleDevices],
+  );
+  const inspectDevice = pinnedDevice ?? hoveredDevice;
   const toneClass = toneClassMap[flow.tone];
   const isTopology = flow.tone === "topologia";
   const hoverCard = useMemo<HoveredDeviceState | null>(() => {
-    if (!hoveredDevice) {
+    if (!inspectDevice) {
       return null;
     }
 
     return {
-      id: hoveredDevice.id,
-      x: hoveredDevice.x + hoveredDevice.width + 18,
-      y: hoveredDevice.y - 10,
+      id: inspectDevice.id,
+      x: inspectDevice.x + inspectDevice.width + 18,
+      y: inspectDevice.y - 10,
       width: 286,
       height: 198,
     };
-  }, [hoveredDevice]);
+  }, [inspectDevice]);
+  const zoneAnchors = useMemo(() => {
+    if (!isTopology) {
+      return [];
+    }
+
+    const anchorByZone = new Map<Device["zone"], Device>();
+
+    visibleDevices.forEach((device) => {
+      const current = anchorByZone.get(device.zone);
+      if (!current || device.y < current.y || (device.y === current.y && device.x < current.x)) {
+        anchorByZone.set(device.zone, device);
+      }
+    });
+
+    return Array.from(anchorByZone.entries()).map(([zone, device]) => ({ zone, device }));
+  }, [isTopology, visibleDevices]);
 
   useEffect(() => {
     function handleMove(event: MouseEvent) {
@@ -568,6 +599,10 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
       const dx = (event.clientX - state.startX) / zoomValue;
       const dy = (event.clientY - state.startY) / zoomValue;
 
+      if (!state.moved && Math.hypot(event.clientX - state.startX, event.clientY - state.startY) > 4) {
+        state.moved = true;
+      }
+
       setPositionOverrides((previous) => ({
         ...previous,
         [state.id]: { x: state.originX + dx, y: state.originY + dy },
@@ -575,8 +610,13 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
     }
 
     function handleUp() {
+      const state = dragStateRef.current;
       dragStateRef.current = null;
       setDraggingDeviceId(null);
+
+      if (state && !state.moved) {
+        setPinnedDeviceId((current) => (current === state.id ? null : state.id));
+      }
     }
 
     window.addEventListener("mousemove", handleMove);
@@ -602,11 +642,14 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
       startY: event.clientY,
       originX: device.x,
       originY: device.y,
+      moved: false,
     };
     setDraggingDeviceId(device.id);
   }
 
   function handleMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
+    setPinnedDeviceId(null);
+
     if (event.button !== 0 || !frameRef.current) {
       return;
     }
@@ -625,6 +668,7 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
 
   useEffect(() => {
     setHoveredDeviceId(null);
+    setPinnedDeviceId(null);
   }, [flow.id]);
 
   return (
@@ -684,6 +728,12 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
               ))
             )}
 
+            {zoneAnchors.map(({ zone, device }) => (
+              <text key={zone} className="zone-label" x={device.x} y={device.y - 12}>
+                {zoneLabelMap[zone]}
+              </text>
+            ))}
+
             {visibleDevices.map((device) => (
               <DeviceNode
                 key={device.id}
@@ -697,9 +747,9 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
             ))}
           </svg>
 
-          {hoveredDevice && hoverCard ? (
+          {inspectDevice && hoverCard ? (
               <div
-                className="device-hover-card"
+                className={`device-hover-card ${pinnedDevice ? "is-pinned" : ""}`}
                 style={{
                   left: hoverCard.x * zoom,
                   top: hoverCard.y * zoom,
@@ -707,11 +757,16 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
                   minHeight: hoverCard.height * zoom,
                 }}
               >
-                <div className={`device-hover-accent device-${hoveredDevice.type}`} />
-                <p className="device-hover-eyebrow">{hoveredDevice.type === "cloud" ? "Transit" : hoveredDevice.type}</p>
-                <strong className="device-hover-title">{hoveredDevice.name}</strong>
-                <span className="device-hover-shortname">{hoveredDevice.shortName}</span>
-                <p className="device-hover-copy">{buildDeviceDescription(hoveredDevice)}</p>
+                {pinnedDevice ? (
+                  <button type="button" className="device-hover-close" onClick={() => setPinnedDeviceId(null)} aria-label="Fechar detalhes">
+                    ×
+                  </button>
+                ) : null}
+                <div className={`device-hover-accent device-${inspectDevice.type}`} />
+                <p className="device-hover-eyebrow">{inspectDevice.type === "cloud" ? "Transit" : inspectDevice.type}</p>
+                <strong className="device-hover-title">{inspectDevice.name}</strong>
+                <span className="device-hover-shortname">{inspectDevice.shortName}</span>
+                <p className="device-hover-copy">{buildDeviceDescription(inspectDevice)}</p>
               </div>
             ) : null}
 
