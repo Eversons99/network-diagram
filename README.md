@@ -17,9 +17,16 @@ The active topology is defined in `src/data/network.ts` and currently covers:
 - ACS / TR069 communication
 - complete network view with core infrastructure only
 
-The virtualization area models `IXC` as a VM behind `Servidor de Virtualizacao / Proxmox`. In provisioning flows, the logical path is:
+The virtualization area models `IXC` as a VM behind `Servidor de Virtualizacao / Proxmox` (device id `tr069`, labeled `SERVIDORES`).
 
-`IXC (VM) -> Servidor de Virtualizacao -> COTIA_DIST_SW_01 -> COTIA_CORE_SW_01 -> COTIA_DIST_SW_02 -> OLT_XPTO_01`
+`provisionamento-ont` models the full round trip (Ida described below; Volta is the same links/devices in reverse —
+there are no directional arrows, so one flow definition covers both directions):
+
+`ONT/ONU -> OLT -> COTIA_DIST_SW_02 -> COTIA_CORE_SW_01 -> COTIA_CORE_BRAS_01 -> COTIA_CORE_SW_01 -> COTIA_DIST_SW_01 -> SERVIDORES -> IXC/RADIUS`
+
+Note `COTIA_CORE_SW_01` (`core`) is visited twice — once towards the BRAS, once towards the server distribution
+switch — so its `path` array revisits the core's coordinates with a small offset between the two passes to keep
+the animated packet's route legible instead of overlapping itself exactly.
 
 The full-topology views (`rede-completa` / `core-fisico-completo`) mirror the latest reference diagram
 (`images_references/Current-network-updated.png`, and its draw.io export at `images_references/Current-network.drawio`):
@@ -58,15 +65,31 @@ npm run preview
 
 ## Project Layout
 
-- `src/App.tsx`: application shell and flow selector
+- `src/App.tsx`: application shell — a slim top bar (brand + theme toggle), a left sidebar listing flows grouped
+  by `category`, the `DiagramCanvas`, and a right details panel (flow summary, stats, animation control)
 - `src/components/DiagramCanvas.tsx`: SVG network rendering — device chassis/cloud rendering, link routing,
-  zoom, pan, drag-to-reposition, and active path animation
+  zoom, pan, drag-to-reposition, click-to-pin device inspector, zone labels, and active path animation
 - `src/components/DeviceGlyph.tsx`: renders the per-type equipment icon (`public/icons/cisco/*.png`) inside a device
 - `src/data/network.ts`: devices, links, and flow definitions
 - `src/types.ts`: shared type definitions
 - `public/icons/cisco/`: equipment icon PNGs, pre-cropped to their own symmetric content bounds (see Editing Notes)
 - `images_references/`: visual references used to guide the UI, including a draw.io export of the current topology
 - `try-network-diagram/`: earlier prototype kept for reference only
+
+## Page Layout
+
+The page is a 3-column grid (`.workspace-grid`): flow nav (220px) | diagram canvas (flexible) | details panel
+(336px). It collapses to a single stacked column below 1180px — if you touch that breakpoint, verify the layout
+at a normal laptop width (~1400px), not just a wide monitor; a stale breakpoint here has silently broken the
+3-column layout before (it was tuned for an older 2-column layout and never updated when the nav column was added).
+
+- Flow switching lives in the sidebar nav (`.flow-nav`), grouped by `flow.category` — there is no `<select>`
+  dropdown anymore.
+- Clicking a device pins an inspector card (name, type, role, description) near it, with a close button.
+  Hovering still shows a transient preview when nothing is pinned. This is separate from dragging: a mousedown
+  that moves more than ~4px is treated as a drag, not a click, so dragging a device never accidentally pins it.
+- The theme control (top bar) is a real toggle switch (track + sliding knob with a sun/moon icon inside),
+  not a labeled button — see `.theme-toggle` / `.theme-toggle-knob` in `index.css`.
 
 ## Device Appearance
 
@@ -87,6 +110,11 @@ touching this:
 - `INTERNET` is a special case: it renders as an actual cloud path (`buildCloudPath`), not the standard chassis.
 - Devices can be dragged around the canvas at runtime for on-the-fly rearrangement; this is session-only state
   and is never written back to `network.ts`.
+- Topology views show a small uppercase zone label (e.g. "Servicos", "Acesso") above the first device of each
+  zone, computed in `zoneAnchors`. This is deliberately a label, not a bounding box: our zones are spatially
+  interleaved (services devices sit in the same rows as access/distribution devices), so a dashed box per zone
+  would overlap other zones rather than group them cleanly. Don't reintroduce full zone boxes without first
+  checking whether the current device layout actually separates zones into clean bands.
 
 ## Editing Notes
 
