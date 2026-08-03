@@ -6,6 +6,7 @@ type DeviceGlyphProps = {
   y: number;
   width: number;
   height: number;
+  pad?: number;
 };
 
 type CiscoAsset = {
@@ -26,10 +27,10 @@ const ciscoAssetMap: Record<DeviceType, CiscoAsset> = {
   ixc: { src: "/icons/cisco/ixc.png", padX: 26, padY: 10 },
 };
 
-export function DeviceGlyph({ type, x, y, width, height }: DeviceGlyphProps) {
+export function DeviceGlyph({ type, x, y, width, height, pad }: DeviceGlyphProps) {
   const asset = ciscoAssetMap[type];
-  const padX = asset.padX ?? 0;
-  const padY = asset.padY ?? 0;
+  const padX = pad ?? asset.padX ?? 0;
+  const padY = pad ?? asset.padY ?? 0;
 
   return (
     <image

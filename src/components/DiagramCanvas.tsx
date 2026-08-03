@@ -2,6 +2,7 @@ import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { devices, links } from "../data/network";
 import type { Device, Flow, Link } from "../types";
+import { DeviceGlyph } from "./DeviceGlyph";
 
 type DiagramCanvasProps = {
   flow: Flow;
@@ -16,6 +17,8 @@ type HoveredDeviceState = {
   height: number;
 };
 
+const DEVICE_ICON_MARGIN = 6;
+
 const toneClassMap: Record<Flow["tone"], string> = {
   ixc: "tone-ixc",
   dhcp: "tone-dhcp",
@@ -24,8 +27,34 @@ const toneClassMap: Record<Flow["tone"], string> = {
   topologia: "tone-topologia",
 };
 
-function buildPolyline(points: Array<[number, number]>) {
-  return points.map(([x, y]) => `${x},${y}`).join(" ");
+function buildRoundedPath(points: Array<[number, number]>, radius = 14) {
+  if (points.length < 3) {
+    return `M ${points.map(([x, y]) => `${x},${y}`).join(" L ")}`;
+  }
+
+  let d = `M ${points[0][0]},${points[0][1]}`;
+
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const [px, py] = points[index - 1];
+    const [cx, cy] = points[index];
+    const [nx, ny] = points[index + 1];
+
+    const distPrev = Math.hypot(cx - px, cy - py) || 1;
+    const distNext = Math.hypot(nx - cx, ny - cy) || 1;
+    const r = Math.min(radius, distPrev / 2, distNext / 2);
+
+    const beforeX = cx + ((px - cx) / distPrev) * r;
+    const beforeY = cy + ((py - cy) / distPrev) * r;
+    const afterX = cx + ((nx - cx) / distNext) * r;
+    const afterY = cy + ((ny - cy) / distNext) * r;
+
+    d += ` L ${beforeX},${beforeY} Q ${cx},${cy} ${afterX},${afterY}`;
+  }
+
+  const [lastX, lastY] = points[points.length - 1];
+  d += ` L ${lastX},${lastY}`;
+
+  return d;
 }
 
 type RenderSegment = {
@@ -107,7 +136,11 @@ function clipPointToDeviceBorder(point: [number, number], nextPoint: [number, nu
   return [x1 + dx * validT, y1 + dy * validT];
 }
 
-function adjustLinkPoints(link: Link, deviceMap: Map<string, Device>) {
+function deviceCenter(device: Device): [number, number] {
+  return [device.x + device.width / 2, device.y + device.height / 2];
+}
+
+function adjustLinkPoints(link: Link, deviceMap: Map<string, Device>, movedIds?: Set<string>) {
   if (link.points.length < 2) {
     return link.points;
   }
@@ -117,11 +150,17 @@ function adjustLinkPoints(link: Link, deviceMap: Map<string, Device>) {
   const toDevice = deviceMap.get(link.to);
 
   if (fromDevice) {
+    if (movedIds?.has(link.from)) {
+      adjustedPoints[0] = deviceCenter(fromDevice);
+    }
     adjustedPoints[0] = clipPointToDeviceBorder(adjustedPoints[0], adjustedPoints[1], fromDevice);
   }
 
   if (toDevice) {
     const lastIndex = adjustedPoints.length - 1;
+    if (movedIds?.has(link.to)) {
+      adjustedPoints[lastIndex] = deviceCenter(toDevice);
+    }
     adjustedPoints[lastIndex] = clipPointToDeviceBorder(adjustedPoints[lastIndex], adjustedPoints[lastIndex - 1], toDevice);
   }
 
@@ -188,13 +227,13 @@ function buildDiagonalSegmentKey(start: [number, number], end: [number, number])
   return startKey < endKey ? `${startKey}-${endKey}` : `${endKey}-${startKey}`;
 }
 
-function buildTopologySegments(activeLinks: Link[], deviceMap: Map<string, Device>) {
+function buildTopologySegments(activeLinks: Link[], deviceMap: Map<string, Device>, movedIds: Set<string>) {
   const horizontalGroups = new Map<number, AxisInterval[]>();
   const verticalGroups = new Map<number, AxisInterval[]>();
   const diagonalSegments = new Map<string, RenderSegment>();
 
   activeLinks.forEach((link) => {
-    const adjustedPoints = adjustLinkPoints(link, deviceMap);
+    const adjustedPoints = adjustLinkPoints(link, deviceMap, movedIds);
 
     adjustedPoints.forEach((point, index) => {
       if (index === adjustedPoints.length - 1) {
@@ -259,47 +298,141 @@ function buildDeviceDescription(device: Device) {
   }
 }
 
+function buildCloudPath(x: number, y: number, width: number, height: number) {
+  const w = width;
+  const h = height;
+
+  return [
+    `M ${x + w * 0.18} ${y + h}`,
+    `C ${x + w * 0.02} ${y + h * 0.95} ${x - w * 0.03} ${y + h * 0.5} ${x + w * 0.16} ${y + h * 0.42}`,
+    `C ${x + w * 0.15} ${y + h * 0.08} ${x + w * 0.46} ${y - h * 0.02} ${x + w * 0.58} ${y + h * 0.22}`,
+    `C ${x + w * 0.67} ${y + h * 0.04} ${x + w * 0.97} ${y + h * 0.1} ${x + w * 0.92} ${y + h * 0.4}`,
+    `C ${x + w * 1.1} ${y + h * 0.44} ${x + w * 1.05} ${y + h} ${x + w * 0.84} ${y + h}`,
+    "Z",
+  ].join(" ");
+}
+
+function wrapDeviceName(name: string, maxChars: number): string[] {
+  const words = name.split(" ");
+  const lines: string[] = [];
+  let current = "";
+
+  words.forEach((word) => {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > maxChars && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  });
+
+  if (current) {
+    lines.push(current);
+  }
+
+  if (lines.length > 2) {
+    return [lines[0], lines.slice(1).join(" ")];
+  }
+
+  return lines;
+}
+
 function DeviceNode({
   device,
   isTopology,
+  isDragging,
   onHoverStart,
   onHoverEnd,
+  onDragStart,
 }: {
   device: Device;
   isTopology: boolean;
+  isDragging: boolean;
   onHoverStart: (device: Device) => void;
   onHoverEnd: () => void;
+  onDragStart: (device: Device, event: ReactMouseEvent<SVGGElement>) => void;
   }) {
-    const labelX = device.x + device.width / 2;
-    const topBarHeight = 12;
-    const titleY = device.y + topBarHeight + 19;
-    const subtitleY = device.y + topBarHeight + 35;
+    const stripeWidth = 4;
+    const iconSize = device.height - DEVICE_ICON_MARGIN * 2;
+    const iconX = device.x + stripeWidth + 4 + DEVICE_ICON_MARGIN;
+    const iconY = device.y + (device.height - iconSize) / 2;
+    const textX = iconX + iconSize + 10;
+    const titleY = device.y + device.height / 2 - 4;
+    const subtitleY = device.y + device.height / 2 + 13;
     const simpleRoleLabel = device.type === "cloud" ? "transit" : device.type;
+
+    const availableTextWidth = device.x + device.width - textX - 8;
+    const maxChars = Math.max(6, Math.floor(availableTextWidth / 6.3));
+    const nameLines = wrapDeviceName(device.name, maxChars);
+    const isWrapped = nameLines.length > 1;
+    const wrappedTitleY = titleY - 6;
+    const finalSubtitleY = isWrapped ? subtitleY + 10 : subtitleY;
+
+    if (device.type === "cloud") {
+      const cloudCenterX = device.x + device.width / 2;
+      const cloudCenterY = device.y + device.height * 0.46;
+
+      return (
+        <g
+          className={`device-node device-cloud is-active ${isTopology ? "is-topology" : ""} ${isDragging ? "is-dragging" : ""}`}
+          onMouseEnter={() => onHoverStart(device)}
+          onMouseLeave={onHoverEnd}
+          onMouseDown={(event) => onDragStart(device, event)}
+        >
+          <path className="device-cloud-shadow" d={buildCloudPath(device.x + 4, device.y + 6, device.width, device.height)} />
+          <path className="device-cloud-shape" d={buildCloudPath(device.x, device.y, device.width, device.height)} />
+          <text className="device-title is-cloud" x={cloudCenterX} y={cloudCenterY}>
+            {device.name}
+          </text>
+        </g>
+      );
+    }
 
     return (
       <g
-        className={`device-node device-${device.type} is-active ${isTopology ? "is-topology" : ""}`}
+        className={`device-node device-${device.type} is-active ${isTopology ? "is-topology" : ""} ${isDragging ? "is-dragging" : ""}`}
         onMouseEnter={() => onHoverStart(device)}
       onMouseLeave={onHoverEnd}
+      onMouseDown={(event) => onDragStart(device, event)}
     >
-      <rect className="device-frame-shadow" x={device.x + 4} y={device.y + 6} width={device.width} height={device.height} rx={12} />
-      <rect className="device-frame" x={device.x} y={device.y} width={device.width} height={device.height} rx={12} />
-      <rect className="device-frame-topbar" x={device.x} y={device.y} width={device.width} height={topBarHeight} rx={12} />
-      <rect className="device-frame-topbar-mask" x={device.x} y={device.y + topBarHeight - 4} width={device.width} height="8" />
-      <line className="device-divider" x1={device.x + 14} y1={device.y + topBarHeight + 42} x2={device.x + device.width - 14} y2={device.y + topBarHeight + 42} />
-      <text className="device-title is-inline" x={labelX} y={titleY}>
-        {device.name}
-      </text>
-      <text className="device-subtitle is-inline" x={labelX} y={subtitleY}>
+      <rect className="device-frame-shadow" x={device.x + 4} y={device.y + 6} width={device.width} height={device.height} rx={7} />
+      <rect className="device-chassis" x={device.x} y={device.y} width={device.width} height={device.height} rx={7} />
+      <rect className="device-chassis-bevel" x={device.x + 1.5} y={device.y + 1.5} width={device.width - 3} height={Math.max(1, device.height / 2 - 3)} rx={5.5} />
+      <rect className="device-accent-stripe" x={device.x} y={device.y} width={stripeWidth + 4} height={device.height} rx={4} />
+      <DeviceGlyph type={device.type} x={iconX} y={iconY} width={iconSize} height={iconSize} pad={iconSize * 0.03} />
+      {isWrapped ? (
+        <text className="device-title is-left" x={textX} y={wrappedTitleY}>
+          <tspan x={textX} dy={0}>{nameLines[0]}</tspan>
+          <tspan x={textX} dy={12}>{nameLines[1]}</tspan>
+        </text>
+      ) : (
+        <text className="device-title is-left" x={textX} y={titleY}>
+          {device.name}
+        </text>
+      )}
+      <text className="device-subtitle is-left" x={textX} y={finalSubtitleY}>
         {simpleRoleLabel}
       </text>
       </g>
     );
   }
 
-function LinkShape({ link, toneClass, isTopology, deviceMap }: { link: Link; toneClass: string; isTopology: boolean; deviceMap: Map<string, Device> }) {
-  const adjustedPoints = adjustLinkPoints(link, deviceMap);
-  const points = buildPolyline(adjustedPoints);
+function LinkShape({
+  link,
+  toneClass,
+  isTopology,
+  deviceMap,
+  movedIds,
+}: {
+  link: Link;
+  toneClass: string;
+  isTopology: boolean;
+  deviceMap: Map<string, Device>;
+  movedIds: Set<string>;
+}) {
+  const adjustedPoints = adjustLinkPoints(link, deviceMap, movedIds);
+  const path = buildRoundedPath(adjustedPoints);
   const fallbackPoint = adjustedPoints[Math.max(0, Math.floor(adjustedPoints.length / 2) - 1)];
   const labelX = link.labelX ?? fallbackPoint[0];
   const labelY = link.labelY ?? fallbackPoint[1] - 14;
@@ -307,8 +440,8 @@ function LinkShape({ link, toneClass, isTopology, deviceMap }: { link: Link; ton
 
   return (
     <g className={`link-group is-active ${isTopology ? "is-topology" : ""}`}>
-      <polyline className="link-base" points={points} />
-      {isTopology ? null : <polyline className={`link-highlight ${toneClass}`} points={points} />}
+      <path className="link-base" d={path} />
+      {isTopology ? null : <path className={`link-highlight ${toneClass}`} d={path} />}
       {!isTopology && link.label ? (
         <text className="link-label" x={labelX} y={labelY} textAnchor={anchor}>
           {link.label}
@@ -318,8 +451,16 @@ function LinkShape({ link, toneClass, isTopology, deviceMap }: { link: Link; ton
   );
 }
 
-function TopologyLinkLayer({ activeLinks, deviceMap }: { activeLinks: Link[]; deviceMap: Map<string, Device> }) {
-  const topologySegments = buildTopologySegments(activeLinks, deviceMap);
+function TopologyLinkLayer({
+  activeLinks,
+  deviceMap,
+  movedIds,
+}: {
+  activeLinks: Link[];
+  deviceMap: Map<string, Device>;
+  movedIds: Set<string>;
+}) {
+  const topologySegments = buildTopologySegments(activeLinks, deviceMap, movedIds);
 
   return (
     <g className="link-group is-active is-topology">
@@ -341,13 +482,30 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
   const [hoveredDeviceId, setHoveredDeviceId] = useState<string | null>(null);
+  const [draggingDeviceId, setDraggingDeviceId] = useState<string | null>(null);
+  const [positionOverrides, setPositionOverrides] = useState<Record<string, { x: number; y: number }>>({});
   const frameRef = useRef<HTMLDivElement | null>(null);
   const panStateRef = useRef({ active: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 });
+  const dragStateRef = useRef<{ id: string; startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const zoomRef = useRef(zoom);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
 
   const activeDeviceIds = useMemo(() => new Set(flow.activeDevices), [flow.activeDevices]);
   const activeLinkIds = useMemo(() => new Set(flow.activeLinks), [flow.activeLinks]);
-  const visibleDevices = useMemo(() => devices.filter((device) => activeDeviceIds.has(device.id)), [activeDeviceIds]);
+  const baseVisibleDevices = useMemo(() => devices.filter((device) => activeDeviceIds.has(device.id)), [activeDeviceIds]);
   const visibleLinks = useMemo(() => links.filter((link) => activeLinkIds.has(link.id)), [activeLinkIds]);
+  const movedIds = useMemo(() => new Set(Object.keys(positionOverrides)), [positionOverrides]);
+  const visibleDevices = useMemo(
+    () =>
+      baseVisibleDevices.map((device) => {
+        const override = positionOverrides[device.id];
+        return override ? { ...device, x: override.x, y: override.y } : device;
+      }),
+    [baseVisibleDevices, positionOverrides],
+  );
   const visibleDeviceMap = useMemo(() => new Map(visibleDevices.map((device) => [device.id, device])), [visibleDevices]);
   const hoveredDevice = useMemo(
     () => visibleDevices.find((device) => device.id === hoveredDeviceId) ?? null,
@@ -398,6 +556,55 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
       window.removeEventListener("mouseup", handleUp);
     };
   }, []);
+
+  useEffect(() => {
+    function handleMove(event: MouseEvent) {
+      const state = dragStateRef.current;
+      if (!state) {
+        return;
+      }
+
+      const zoomValue = zoomRef.current;
+      const dx = (event.clientX - state.startX) / zoomValue;
+      const dy = (event.clientY - state.startY) / zoomValue;
+
+      setPositionOverrides((previous) => ({
+        ...previous,
+        [state.id]: { x: state.originX + dx, y: state.originY + dy },
+      }));
+    }
+
+    function handleUp() {
+      dragStateRef.current = null;
+      setDraggingDeviceId(null);
+    }
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, []);
+
+  function handleDeviceDragStart(device: Device, event: ReactMouseEvent<SVGGElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+
+    event.stopPropagation();
+    event.preventDefault();
+
+    dragStateRef.current = {
+      id: device.id,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: device.x,
+      originY: device.y,
+    };
+    setDraggingDeviceId(device.id);
+  }
 
   function handleMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
     if (event.button !== 0 || !frameRef.current) {
@@ -453,12 +660,27 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
         onContextMenu={(event) => event.preventDefault()}
       >
         <div className="diagram-surface" style={{ transform: `scale(${zoom})` }}>
-          <svg viewBox="0 0 1860 1920" role="img" aria-label={flow.name}>
+          <svg viewBox="-150 0 2010 1920" role="img" aria-label={flow.name}>
+            <defs>
+              <filter id="icon-white-cutout" x="-20%" y="-20%" width="140%" height="140%" colorInterpolationFilters="sRGB">
+                <feComponentTransfer>
+                  <feFuncR type="table" tableValues="1 0" />
+                  <feFuncG type="table" tableValues="1 0" />
+                  <feFuncB type="table" tableValues="1 0" />
+                </feComponentTransfer>
+                <feColorMatrix type="luminanceToAlpha" />
+                <feComponentTransfer>
+                  <feFuncR type="table" tableValues="1 1" />
+                  <feFuncG type="table" tableValues="1 1" />
+                  <feFuncB type="table" tableValues="1 1" />
+                </feComponentTransfer>
+              </filter>
+            </defs>
             {isTopology ? (
-              <TopologyLinkLayer activeLinks={visibleLinks} deviceMap={visibleDeviceMap} />
+              <TopologyLinkLayer activeLinks={visibleLinks} deviceMap={visibleDeviceMap} movedIds={movedIds} />
             ) : (
               visibleLinks.map((link) => (
-                <LinkShape key={link.id} link={link} toneClass={toneClass} isTopology={isTopology} deviceMap={visibleDeviceMap} />
+                <LinkShape key={link.id} link={link} toneClass={toneClass} isTopology={isTopology} deviceMap={visibleDeviceMap} movedIds={movedIds} />
               ))
             )}
 
@@ -467,8 +689,10 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
                 key={device.id}
                 device={device}
                 isTopology={isTopology}
+                isDragging={draggingDeviceId === device.id}
                 onHoverStart={(nextDevice) => setHoveredDeviceId(nextDevice.id)}
                 onHoverEnd={() => setHoveredDeviceId((current) => (current === device.id ? null : current))}
+                onDragStart={handleDeviceDragStart}
               />
             ))}
           </svg>
