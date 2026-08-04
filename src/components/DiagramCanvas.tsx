@@ -1,7 +1,7 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { devices, links } from "../data/network";
-import type { Device, Flow, Link } from "../types";
+import type { Device, Flow, FlowRenderDevice, Link } from "../types";
 import { DeviceGlyph } from "./DeviceGlyph";
 
 type DiagramCanvasProps = {
@@ -88,6 +88,7 @@ function packetStyle(path: Array<[number, number]>, isAnimating: boolean): CSSPr
     offsetPath: buildOffsetPath(path),
     offsetRotate: "0deg",
     animationPlayState: isAnimating ? "running" : "paused",
+    transform: "translate(-50%, -50%)",
   };
 }
 
@@ -307,6 +308,26 @@ function buildDeviceDescription(device: Device) {
   }
 }
 
+function hydrateRenderDevice(renderDevice: FlowRenderDevice, deviceCatalog: Device[]) {
+  const baseDevice = deviceCatalog.find((device) => device.id === renderDevice.baseDeviceId);
+
+  if (!baseDevice) {
+    return null;
+  }
+
+  return {
+    ...baseDevice,
+    id: renderDevice.id,
+    x: renderDevice.x,
+    y: renderDevice.y,
+    width: renderDevice.width ?? baseDevice.width,
+    height: renderDevice.height ?? baseDevice.height,
+    name: renderDevice.name ?? baseDevice.name,
+    shortName: renderDevice.shortName ?? baseDevice.shortName,
+    role: renderDevice.role ?? baseDevice.role,
+  };
+}
+
 function buildCloudPath(x: number, y: number, width: number, height: number) {
   const w = width;
   const h = height;
@@ -505,16 +526,45 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
 
   const activeDeviceIds = useMemo(() => new Set(flow.activeDevices), [flow.activeDevices]);
   const activeLinkIds = useMemo(() => new Set(flow.activeLinks), [flow.activeLinks]);
-  const baseVisibleDevices = useMemo(() => devices.filter((device) => activeDeviceIds.has(device.id)), [activeDeviceIds]);
-  const visibleLinks = useMemo(() => links.filter((link) => activeLinkIds.has(link.id)), [activeLinkIds]);
+  const flowDevicePositions = flow.layout?.devicePositions;
+  const flowLinkPoints = flow.layout?.linkPoints;
+  const flowViewBox = flow.layout?.viewBox;
+  const flowRenderDevices = flow.layout?.renderDevices;
+  const flowRenderLinks = flow.layout?.renderLinks;
+  const baseVisibleDevices = useMemo(() => {
+    if (flowRenderDevices?.length) {
+      return flowRenderDevices
+        .map((renderDevice) => hydrateRenderDevice(renderDevice, devices))
+        .filter((device): device is Device => device !== null);
+    }
+
+    return devices.filter((device) => activeDeviceIds.has(device.id));
+  }, [activeDeviceIds, flowRenderDevices]);
+  const visibleLinks = useMemo(
+    () => {
+      if (flowRenderLinks?.length) {
+        return flowRenderLinks;
+      }
+
+      return links
+        .filter((link) => activeLinkIds.has(link.id))
+        .map((link) => {
+          const points = flowLinkPoints?.[link.id];
+          return points ? { ...link, points } : link;
+        });
+    },
+    [activeLinkIds, flowLinkPoints, flowRenderLinks],
+  );
   const movedIds = useMemo(() => new Set(Object.keys(positionOverrides)), [positionOverrides]);
   const visibleDevices = useMemo(
     () =>
       baseVisibleDevices.map((device) => {
+        const flowPosition = flowDevicePositions?.[device.id];
         const override = positionOverrides[device.id];
-        return override ? { ...device, x: override.x, y: override.y } : device;
+        const baseDevice = flowPosition ? { ...device, x: flowPosition.x, y: flowPosition.y } : device;
+        return override ? { ...baseDevice, x: override.x, y: override.y } : baseDevice;
       }),
-    [baseVisibleDevices, positionOverrides],
+    [baseVisibleDevices, flowDevicePositions, positionOverrides],
   );
   const visibleDeviceMap = useMemo(() => new Map(visibleDevices.map((device) => [device.id, device])), [visibleDevices]);
   const hoveredDevice = useMemo(
@@ -669,6 +719,8 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
   useEffect(() => {
     setHoveredDeviceId(null);
     setPinnedDeviceId(null);
+    setDraggingDeviceId(null);
+    setPositionOverrides({});
   }, [flow.id]);
 
   return (
@@ -704,7 +756,15 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
         onContextMenu={(event) => event.preventDefault()}
       >
         <div className="diagram-surface" style={{ transform: `scale(${zoom})` }}>
-          <svg viewBox="-150 0 2010 1920" role="img" aria-label={flow.name}>
+          <svg
+            viewBox={
+              flowViewBox
+                ? `${flowViewBox.minX} ${flowViewBox.minY} ${flowViewBox.width} ${flowViewBox.height}`
+                : "-150 0 2010 1920"
+            }
+            role="img"
+            aria-label={flow.name}
+          >
             <defs>
               <filter id="icon-white-cutout" x="-20%" y="-20%" width="140%" height="140%" colorInterpolationFilters="sRGB">
                 <feComponentTransfer>
@@ -724,7 +784,14 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
               <TopologyLinkLayer activeLinks={visibleLinks} deviceMap={visibleDeviceMap} movedIds={movedIds} />
             ) : (
               visibleLinks.map((link) => (
-                <LinkShape key={link.id} link={link} toneClass={toneClass} isTopology={isTopology} deviceMap={visibleDeviceMap} movedIds={movedIds} />
+                <LinkShape
+                  key={link.id}
+                  link={link}
+                  toneClass={toneClass}
+                  isTopology={isTopology}
+                  deviceMap={visibleDeviceMap}
+                  movedIds={movedIds}
+                />
               ))
             )}
 

@@ -57,6 +57,12 @@ Keep topology and flow behavior centralized in `src/data/network.ts`. Prefer edi
   `bras02`, `core`, `internet` — topology-only devices (CDNs, A10, Cluster Antigo/Novo, Stack Dell, dist03,
   Santana/Itapevi, Lumen) are never referenced there. Keep it that way: it means topology repositioning never
   needs to touch the operational flows' hand-authored link/path coordinates.
+- When a user asks for a step-by-step communication-flow sketch that does not match the shared topology geometry,
+  build it as a custom mini-diagram in `src/data/network.ts` using `flow.layout.renderDevices` and
+  `flow.layout.renderLinks` instead of editing the global `devices` / `links` coordinates. Reuse base device IDs so
+  the custom nodes inherit the same chassis style, icon, and hover description behavior from `DiagramCanvas.tsx`.
+- For custom communication-flow diagrams, keep the packet `path` aligned to the exact rendered link bend points. The
+  animation badge should travel centered over the highlighted connection, not cut through empty canvas space.
 - Device appearance is a hardware chassis (icon + accent stripe + label), not a UI card — see `README.md`
   "Device Appearance" before changing `DeviceNode` styling or icon assets. In particular: icon PNGs must stay
   cropped with symmetric margin around their content (never clamp margins to the source canvas edge — it

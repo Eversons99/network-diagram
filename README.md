@@ -47,6 +47,11 @@ The 6 operational flows (provisioning, DHCP, PPPoE, TR069) only reference `dist0
 `onu`, `cpe`, `tr069`, `ixc`, `bras`, `bras02`, `core`, `internet` — their hardcoded link/path coordinates are
 independent of the topology-only devices above, so topology-only changes should never need to touch them.
 
+Custom communication-flow diagrams can now opt into their own mini-layout instead of reusing the full-network
+geometry. These flows use `flow.layout.renderDevices` / `flow.layout.renderLinks` in `src/data/network.ts` to draw
+purpose-built step diagrams while still inheriting the shared chassis styling, iconography, hover descriptions, and
+packet animation behavior from `DiagramCanvas.tsx`.
+
 ## Development
 
 From the repository root:
@@ -121,4 +126,8 @@ touching this:
 - For flow views, devices outside the selected path should remain hidden.
 - For the complete-network view, hide subscriber CPEs such as ONT, ONU, and residential routers.
 - In virtualization-only summaries, represent the physical host rather than exposing every VM unless the flow explicitly needs it.
+- For custom communication-flow diagrams, prefer `layout.renderDevices` / `layout.renderLinks` over mutating the
+  shared topology coordinates. This keeps step-by-step diagrams independent from the complete-network view.
+- When animating packets in a custom flow, make the `path` follow the exact bend points of the rendered links so the
+  badge stays centered over the highlighted connection instead of cutting across empty space.
 - Run `npm run build` after topology, path, or UI changes.

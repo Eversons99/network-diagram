@@ -4,6 +4,14 @@ import { devices, flows } from "./data/network";
 
 type ThemeMode = "light" | "dark";
 
+const DEFAULT_FLOW_ID = "rede-completa";
+const VISIBLE_FLOW_IDS = new Set([
+  "rede-completa",
+  "fluxo-autenticacao-ppp",
+  "acs-tr069-etapa-1-dhcp",
+  "acs-tr069-etapa-2-comunicacao",
+]);
+
 const zoneLabelMap = {
   transit: "Transit",
   servicos: "Servicos",
@@ -14,7 +22,7 @@ const zoneLabelMap = {
 } as const;
 
 export default function App() {
-  const [activeFlowId, setActiveFlowId] = useState(flows[0].id);
+  const [activeFlowId, setActiveFlowId] = useState(DEFAULT_FLOW_ID);
   const [isAnimating, setIsAnimating] = useState(true);
   const [theme, setTheme] = useState<ThemeMode>(() => {
     if (typeof window === "undefined") {
@@ -26,7 +34,7 @@ export default function App() {
   });
 
   const activeFlow = useMemo(
-    () => flows.find((flow) => flow.id === activeFlowId) ?? flows[0],
+    () => flows.find((flow) => flow.id === activeFlowId) ?? flows.find((flow) => flow.id === DEFAULT_FLOW_ID) ?? flows[0],
     [activeFlowId],
   );
   const activeZones = useMemo(() => {
@@ -40,9 +48,10 @@ export default function App() {
   }, [activeFlow.activeDevices]);
 
   const flowGroups = useMemo(() => {
+    const visibleFlows = flows.filter((flow) => VISIBLE_FLOW_IDS.has(flow.id));
     const groups: Array<{ category: string; flows: typeof flows }> = [];
 
-    flows.forEach((flow) => {
+    visibleFlows.forEach((flow) => {
       const group = groups.find((entry) => entry.category === flow.category);
       if (group) {
         group.flows.push(flow);
