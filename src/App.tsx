@@ -10,13 +10,15 @@ const VISIBLE_FLOW_IDS = new Set([
   "fluxo-autenticacao-ppp",
   "acs-tr069-etapa-1-dhcp",
   "acs-tr069-etapa-2-comunicacao",
+  "comunicacao-internet-sem-nat",
+  "comunicacao-internet-com-nat",
 ]);
 
 const zoneLabelMap = {
   transit: "Transit",
-  servicos: "Servicos",
+  servicos: "Serviços",
   core: "Core",
-  distribuicao: "Distribuicao",
+  distribuicao: "Distribuição",
   acesso: "Acesso",
   clientes: "Clientes",
 } as const;
@@ -74,8 +76,8 @@ export default function App() {
     <main className="app-shell" data-theme={theme}>
       <header className="top-bar">
         <div className="brand">
-          <strong>Intranet GPON</strong>
-          <span>Explained</span>
+          <strong>Topologia da Rede</strong>
+          <span>ISP · GPON</span>
         </div>
 
         <button
@@ -107,7 +109,7 @@ export default function App() {
       </header>
 
       <section className="workspace-grid">
-        <nav className="flow-nav" aria-label="Fluxos disponiveis">
+        <nav className="flow-nav" aria-label="Fluxos disponíveis">
           {flowGroups.map((group) => (
             <div key={group.category} className="flow-nav-group">
               <p className="flow-nav-category">{group.category}</p>
@@ -134,6 +136,21 @@ export default function App() {
             <p className="eyebrow">Resumo</p>
             <h2>{activeFlow.name}</h2>
             <p className="summary">{activeFlow.summary}</p>
+
+            {activeFlow.route?.length ? (
+              <ol className="route-trail">
+                {activeFlow.route.map((hop, index) => (
+                  <li key={`${hop}-${index}`} className="route-hop">
+                    <span>{hop}</span>
+                    {index < activeFlow.route!.length - 1 ? (
+                      <span className="route-arrow" aria-hidden="true">
+                        &rarr;
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
           </div>
 
           <div className="details-card details-grid">
@@ -161,7 +178,7 @@ export default function App() {
 
           <div className="details-card">
             <div className="details-heading">
-              <p className="eyebrow">Animacao</p>
+              <p className="eyebrow">Animação</p>
               <button
                 type="button"
                 className="inline-toggle"
@@ -169,7 +186,7 @@ export default function App() {
                 aria-pressed={isAnimating}
                 disabled={!canAnimate}
               >
-                {canAnimate ? (isAnimating ? "Pausar fluxo" : "Animar fluxo") : "Sem animacao"}
+                {canAnimate ? (isAnimating ? "Pausar fluxo" : "Animar fluxo") : "Sem animação"}
               </button>
             </div>
 

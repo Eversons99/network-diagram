@@ -56,6 +56,7 @@ export type Flow = {
   source: string;
   destination: string;
   summary: string;
+  route?: string[];
   details: string[];
   activeDevices: string[];
   activeLinks: string[];

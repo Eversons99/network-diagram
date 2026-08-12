@@ -51,7 +51,7 @@ Keep topology and flow behavior centralized in `src/data/network.ts`. Prefer edi
 - The topology-only device set (`rede-completa` / `core-fisico-completo`) must match
   `images_references/Current-network-updated.png` (draw.io export: `images_references/Current-network.drawio`):
   distribution row order is `dist01, dist02, dist03, stackdell, thermas, jandira, lumen` with `stackdell` centered
-  under `core`; `dist01` hosts `cluster-antigo` / `cdns` / `a10` (no OLT); `dist03` + `stackdell` both link to
+  under `core`; `dist01` hosts `cluster-antigo` / `cdns` (no OLT); `a10` hangs off `dist02` instead; `dist03` + `stackdell` both link to
   `core` and to `cluster-novo`; `jandira` has no direct OLT, only via `santana` / `itapevi`; `lumen` is a dead end.
 - The 6 operational flows only reference `dist01`, `dist02`, `olt`, `ont`, `onu`, `cpe`, `tr069`, `ixc`, `bras`,
   `bras02`, `core`, `internet` — topology-only devices (CDNs, A10, Cluster Antigo/Novo, Stack Dell, dist03,

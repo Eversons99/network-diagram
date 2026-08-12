@@ -34,8 +34,8 @@ The full-topology views (`rede-completa` / `core-fisico-completo`) mirror the la
 - `COTIA_CORE_SW_01` fans out to a row of distribution switches, in this left-to-right order: `COTIA_DIST_SW_01`,
   `COTIA_DIST_SW_02`, `COTIA_DIST_SW_03`, `STACK_DELL_NODE01`, `THERMAS_DIST_SW_01`, `JANDIRA_DIST_SW_01`,
   `LUMEN_DIST_SW_01` — `STACK_DELL_NODE01` is deliberately centered directly under the core switch.
-- `COTIA_DIST_SW_01` hosts the services branch: `CLUSTER (ANTIGO) SERVIDORES PVE/PBS`, `CDNs`, and
-  `A10 (NODE1 e 2)` — it no longer terminates an OLT/ONT chain.
+- `COTIA_DIST_SW_01` hosts the services branch: `CLUSTER (ANTIGO) SERVIDORES PVE/PBS` and `CDNs` — it no longer
+  terminates an OLT/ONT chain. `A10 (NODE1 e 2)` hangs off `COTIA_DIST_SW_02` instead.
 - `COTIA_DIST_SW_03` and `STACK_DELL_NODE01` both connect independently to the core, to each other, and down to
   `CLUSTER (NOVO) SERVIDORES PVE/PBS`.
 - `NFWARE/CGNAT` connects directly and horizontally to the core switch.

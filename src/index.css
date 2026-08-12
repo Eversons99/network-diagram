@@ -37,6 +37,9 @@
   --pppoe: #8d68f2;
   --tr069: #12bb87;
   --topologia: #738695;
+  --scrollbar-track: rgba(255, 255, 255, 0.03);
+  --scrollbar-thumb: rgba(120, 165, 210, 0.35);
+  --scrollbar-thumb-hover: rgba(140, 185, 230, 0.55);
 }
 
 :root[data-theme="light"] {
@@ -69,6 +72,9 @@
   --chassis-edge: rgba(15, 35, 52, 0.32);
   --chassis-bevel: rgba(255, 255, 255, 0.1);
   --chassis-well: rgba(0, 0, 0, 0.24);
+  --scrollbar-track: rgba(16, 49, 73, 0.04);
+  --scrollbar-thumb: rgba(49, 90, 118, 0.28);
+  --scrollbar-thumb-hover: rgba(49, 90, 118, 0.45);
 }
 
 * {
@@ -176,6 +182,39 @@ small {
 .details-list {
   color: var(--muted);
   line-height: 1.55;
+}
+
+.route-trail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.route-hop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.route-hop span:first-child {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--pill-bg);
+  box-shadow: inset 0 0 0 1px var(--edge);
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.route-arrow {
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .meta-label {
@@ -394,6 +433,9 @@ small {
 
 .diagram-frame {
   position: relative;
+  display: flex;
+  align-items: safe center;
+  justify-content: safe center;
   overflow: auto;
   height: min(1180px, 78vh);
   padding: 12px;
@@ -406,6 +448,33 @@ small {
     0 0 0 1px rgba(110, 152, 192, 0.22);
   cursor: grab;
   scrollbar-gutter: stable both-edges;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+.diagram-frame::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+
+.diagram-frame::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-radius: 999px;
+}
+
+.diagram-frame::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+.diagram-frame::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+.diagram-frame::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .diagram-frame.is-panning {
@@ -419,6 +488,7 @@ small {
 
 .diagram-surface {
   position: relative;
+  flex-shrink: 0;
   width: max-content;
   transform-origin: top left;
   transition-property: transform;
@@ -428,8 +498,6 @@ small {
 
 .diagram-surface svg {
   display: block;
-  width: 1840px;
-  height: auto;
 }
 
 .device-hover-card {

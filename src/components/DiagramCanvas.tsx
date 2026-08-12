@@ -18,12 +18,13 @@ type HoveredDeviceState = {
 };
 
 const DEVICE_ICON_MARGIN = 6;
+const DEFAULT_VIEWBOX = { minX: -150, minY: 0, width: 2010, height: 1920 };
 
 const zoneLabelMap: Record<Device["zone"], string> = {
   transit: "Transit",
-  servicos: "Servicos",
+  servicos: "Serviços",
   core: "Core",
-  distribuicao: "Distribuicao",
+  distribuicao: "Distribuição",
   acesso: "Acesso",
   clientes: "Clientes",
 };
@@ -79,16 +80,15 @@ type AxisInterval = {
   end: number;
 };
 
-function buildOffsetPath(points: Array<[number, number]>) {
-  return `path('M ${points.map(([x, y], index) => `${index === 0 ? "" : "L "}${x} ${y}`).join(" ")}')`;
+function buildOffsetPath(points: Array<[number, number]>, originX: number, originY: number) {
+  return `path('M ${points.map(([x, y], index) => `${index === 0 ? "" : "L "}${x - originX} ${y - originY}`).join(" ")}')`;
 }
 
-function packetStyle(path: Array<[number, number]>, isAnimating: boolean): CSSProperties {
+function packetStyle(path: Array<[number, number]>, isAnimating: boolean, originX: number, originY: number): CSSProperties {
   return {
-    offsetPath: buildOffsetPath(path),
+    offsetPath: buildOffsetPath(path, originX, originY),
     offsetRotate: "0deg",
     animationPlayState: isAnimating ? "running" : "paused",
-    transform: "translate(-50%, -50%)",
   };
 }
 
@@ -283,24 +283,24 @@ function buildTopologySegments(activeLinks: Link[], deviceMap: Map<string, Devic
 function buildDeviceDescription(device: Device) {
   switch (device.type) {
     case "cloud":
-      return "Ponto de saida da rede para o upstream principal, concentrando a borda de Internet e a interligacao com o backbone externo.";
+      return "Ponto de saída da rede para o upstream principal, concentrando a borda de Internet e a interligação com o backbone externo.";
     case "router":
-      return `Elemento de roteamento responsavel por ${device.role.toLowerCase()}, mantendo a continuidade do trafego entre borda e core.`;
+      return `Elemento de roteamento responsável por ${device.role.toLowerCase()}, mantendo a continuidade do tráfego entre borda e core.`;
     case "switch":
       if (device.zone === "core") {
-        return "Nucleo de comutacao e agregacao da malha principal, distribuindo o trafego entre upstream, distribuicao e acesso.";
+        return "Núcleo de comutação e agregação da malha principal, distribuindo o tráfego entre upstream, distribuição e acesso.";
       }
-      return "Switch de distribuicao que consolida enlaces do site e encaminha o trafego para o proximo dominio da topologia.";
+      return "Switch de distribuição que consolida enlaces do site e encaminha o tráfego para o próximo domínio da topologia.";
     case "server":
-      return `Bloco de servicos que suporta ${device.role.toLowerCase()} e centraliza workloads operacionais do ambiente.`;
+      return `Bloco de serviços que suporta ${device.role.toLowerCase()} e centraliza workloads operacionais do ambiente.`;
     case "ixc":
-      return "Aplicacao central de ERP e provisionamento, usada para automacao operacional, integracao e gestao de clientes.";
+      return "Aplicação central de ERP e provisionamento, usada para automação operacional, integração e gestão de clientes.";
     case "olt":
-      return `Equipamento GPON de acesso responsavel por terminar as portas PON e entregar o servico no dominio ${device.shortName.toLowerCase()}.`;
+      return `Equipamento GPON de acesso responsável por terminar as portas PON e entregar o serviço no domínio ${device.shortName.toLowerCase()}.`;
     case "ont":
-      return "Terminal do assinante na ponta da fibra, responsavel por encerrar a conexao optica e apresentar a WAN de servico.";
+      return "Terminal do assinante na ponta da fibra, responsável por encerrar a conexão óptica e apresentar a WAN de serviço.";
     case "onu":
-      return "Unidade optica no lado do cliente que faz a terminacao de acesso e a ponte para o equipamento residencial.";
+      return "Unidade óptica no lado do cliente que faz a terminação de acesso e a ponte para o equipamento residencial.";
     case "cpe":
       return "Equipamento residencial do assinante, usado para autenticar, rotear e distribuir a conectividade entregue pela rede.";
     default:
@@ -529,6 +529,7 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
   const flowDevicePositions = flow.layout?.devicePositions;
   const flowLinkPoints = flow.layout?.linkPoints;
   const flowViewBox = flow.layout?.viewBox;
+  const activeViewBox = flowViewBox ?? DEFAULT_VIEWBOX;
   const flowRenderDevices = flow.layout?.renderDevices;
   const flowRenderLinks = flow.layout?.renderLinks;
   const baseVisibleDevices = useMemo(() => {
@@ -757,11 +758,8 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
       >
         <div className="diagram-surface" style={{ transform: `scale(${zoom})` }}>
           <svg
-            viewBox={
-              flowViewBox
-                ? `${flowViewBox.minX} ${flowViewBox.minY} ${flowViewBox.width} ${flowViewBox.height}`
-                : "-150 0 2010 1920"
-            }
+            viewBox={`${activeViewBox.minX} ${activeViewBox.minY} ${activeViewBox.width} ${activeViewBox.height}`}
+            style={{ width: activeViewBox.width, height: activeViewBox.height }}
             role="img"
             aria-label={flow.name}
           >
@@ -838,7 +836,10 @@ export function DiagramCanvas({ flow, isAnimating }: DiagramCanvasProps) {
             ) : null}
 
           {flow.packetLabel && flow.path.length > 1 ? (
-            <div className={`packet-overlay ${isAnimating ? "is-animating" : ""}`} style={packetStyle(flow.path, isAnimating)}>
+            <div
+              className={`packet-overlay ${isAnimating ? "is-animating" : ""}`}
+              style={packetStyle(flow.path, isAnimating, activeViewBox.minX, activeViewBox.minY)}
+            >
               <span className={`packet ${toneClass}`}>{flow.packetLabel}</span>
             </div>
           ) : null}
