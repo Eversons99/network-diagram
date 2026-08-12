@@ -84,11 +84,24 @@ function buildOffsetPath(points: Array<[number, number]>, originX: number, origi
   return `path('M ${points.map(([x, y], index) => `${index === 0 ? "" : "L "}${x - originX} ${y - originY}`).join(" ")}')`;
 }
 
+const PACKET_SPEED_PX_PER_SEC = 250;
+
+function pathLength(points: Array<[number, number]>) {
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const [px, py] = points[index - 1];
+    const [x, y] = points[index];
+    length += Math.hypot(x - px, y - py);
+  }
+  return length;
+}
+
 function packetStyle(path: Array<[number, number]>, isAnimating: boolean, originX: number, originY: number): CSSProperties {
   return {
     offsetPath: buildOffsetPath(path, originX, originY),
     offsetRotate: "0deg",
     animationPlayState: isAnimating ? "running" : "paused",
+    animationDuration: `${pathLength(path) / PACKET_SPEED_PX_PER_SEC}s`,
   };
 }
 
