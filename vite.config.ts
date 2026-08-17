@@ -3,6 +3,9 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  base: "/",
-  server: {},
+  base: "/network-diagram/",
+  server: {
+    host: true,
+    allowedHosts: ["commands.nmultifibra.com.br"],
+  },
 });
